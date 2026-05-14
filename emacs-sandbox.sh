@@ -61,6 +61,14 @@ mkdir -p \
     "$HOME/.local/share/pnpm/store" \
     "$HOME/.cache/pip"
 
+# Emacs server socket dir: the sandboxed Emacs creates its server socket
+# at $XDG_RUNTIME_DIR/emacs/server. Without a host-side bind it lives in
+# the sandbox's tmpfs view of /run and is invisible to host emacsclient.
+USER_ID="$(id -u)"
+XDG_DIR="${XDG_RUNTIME_DIR:-/run/user/$USER_ID}"
+mkdir -p "$XDG_DIR/emacs"
+chmod 700 "$XDG_DIR/emacs"
+
 # ── Effective workspace (writable root) ──────────────────────────────
 # The configured WORKSPACE_DIR is the broadest the sandbox will ever allow.
 # EMACS_SANDBOX_WORKSPACE=... can narrow it (never widen); it must be a
@@ -97,8 +105,6 @@ else
 fi
 
 # ── xdg-dbus-proxy (filtered session bus for portals + notifications) ─
-USER_ID="$(id -u)"
-XDG_DIR="${XDG_RUNTIME_DIR:-/run/user/$USER_ID}"
 PROXY_DIR=
 proxy_pid=
 if command -v xdg-dbus-proxy &>/dev/null && [[ -n "$DBUS_SESSION_BUS_ADDRESS" ]]; then
@@ -204,6 +210,13 @@ ARGS+=(
     # must be bound rw because the protocol is a round-trip stream).
     --bind "$XDG_DIR/wayland-0"      "$XDG_DIR/wayland-0"
     --bind "$XDG_DIR/wayland-0.lock" "$XDG_DIR/wayland-0.lock"
+
+    # Emacs server socket directory. Bound rw so M-x server-start inside
+    # the sandbox produces a socket that host `emacsclient` can reach.
+    # Files opened via emacsclient still have to live within the
+    # sandbox's writable scope (workspace or ~/.emacs.d) for the server
+    # to actually read them.
+    --bind "$XDG_DIR/emacs" "$XDG_DIR/emacs"
 
     # Fonts (so the sandboxed Emacs sees user-installed fonts and any
     # fontconfig overrides). Read-only -- the sandbox should not be
