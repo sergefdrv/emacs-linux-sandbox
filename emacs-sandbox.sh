@@ -59,7 +59,9 @@ mkdir -p \
     "$HOME/.cargo/registry" \
     "$HOME/.npm/_cacache" \
     "$HOME/.local/share/pnpm/store" \
-    "$HOME/.cache/pip"
+    "$HOME/.cache/pip" \
+    "$HOME/go/pkg/mod" \
+    "$HOME/.cache/go-build"
 
 # Emacs server socket dir: the sandboxed Emacs creates its server socket
 # at $XDG_RUNTIME_DIR/emacs/server. Without a host-side bind it lives in
@@ -189,12 +191,14 @@ ARGS+=(
     # The package managers verify content integrity against lockfiles, so
     # sharing these with the host does not let a sandboxed process forge
     # cache contents. Adding these RW carve-outs makes M-x compile with
-    # cargo / npm / pnpm / pip work inside the sandbox without falling
+    # cargo / npm / pnpm / pip / go work inside the sandbox without falling
     # back to "no cache" or failing on write.
     --bind "$HOME/.cargo/registry"          "$HOME/.cargo/registry"
     --bind "$HOME/.npm/_cacache"            "$HOME/.npm/_cacache"
     --bind "$HOME/.local/share/pnpm/store"  "$HOME/.local/share/pnpm/store"
     --bind "$HOME/.cache/pip"               "$HOME/.cache/pip"
+    --bind "$HOME/go/pkg/mod"               "$HOME/go/pkg/mod"
+    --bind "$HOME/.cache/go-build"          "$HOME/.cache/go-build"
 
     # Read-only shell rc + git config (so M-x shell / vterm / ansi-term
     # subshells feel familiar)
