@@ -163,6 +163,16 @@ ARGS=(
     --ro-bind-try /run/NetworkManager  /run/NetworkManager
     --ro-bind-try /run/resolvconf      /run/resolvconf
 
+    # Targets of /usr -> /var symlinks on Debian/Ubuntu. /usr stays pure
+    # while these dirs hold files that package postinst scripts regenerate
+    # (dictionary indexes, TeX format dumps, Ghostscript CMaps).
+    #   aspell      -- /usr/lib/aspell/*.rws            (ispell-mode)
+    #   texmf       -- /usr/share/texmf/{ls-R,web2c/*}  (AUCTeX, tex-mode)
+    #   ghostscript -- /usr/share/ghostscript/*/CMap    (doc-view, pdf-tools)
+    --ro-bind-try /var/lib/aspell      /var/lib/aspell
+    --ro-bind-try /var/lib/texmf       /var/lib/texmf
+    --ro-bind-try /var/lib/ghostscript /var/lib/ghostscript
+
     # Blanket-tmpfs $HOME, then re-expose only what's needed
     --tmpfs "$HOME"
 
