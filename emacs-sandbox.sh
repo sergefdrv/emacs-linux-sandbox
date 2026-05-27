@@ -63,6 +63,14 @@ mkdir -p \
     "$HOME/go/pkg/mod" \
     "$HOME/.cache/go-build"
 
+# Sandbox-private overlay for the XDG state dirs. Inside the sandbox,
+# ~/.config, ~/.cache, and ~/.local are bound from these scratch dirs
+# instead of the host's real XDG tree -- subprocess writes (LSP state,
+# tool caches, dotfile-style configs) persist on disk across sessions
+# but never reach the host's real ones. Wipe to reset.
+OVERLAY_DIR="$HOME/.local/share/emacs-sandbox"
+mkdir -p "$OVERLAY_DIR/config" "$OVERLAY_DIR/cache" "$OVERLAY_DIR/local"
+
 # Emacs server socket dir: the sandboxed Emacs creates its server socket
 # at $XDG_RUNTIME_DIR/emacs/server. Without a host-side bind it lives in
 # the sandbox's tmpfs view of /run and is invisible to host emacsclient.
@@ -175,6 +183,16 @@ ARGS=(
 
     # Blanket-tmpfs $HOME, then re-expose only what's needed
     --tmpfs "$HOME"
+
+    # Sandbox-private overlay for ~/.config, ~/.cache, and ~/.local.
+    # Mounted from a host-side scratch dir so apps inside the sandbox
+    # see a fresh, persistent XDG tree -- invisible to the host's real
+    # config/cache/local. Per-subdir binds further down (fontconfig,
+    # dconf, gtk-*, .local/bin, .local/share/pnpm, pip, go-build) layer
+    # on top of these as separate mounts.
+    --bind "$OVERLAY_DIR/config" "$HOME/.config"
+    --bind "$OVERLAY_DIR/cache"  "$HOME/.cache"
+    --bind "$OVERLAY_DIR/local"  "$HOME/.local"
 
     # Writable: workspace (possibly narrowed) + Emacs' own state
     --bind "$effective_workspace" "$effective_workspace"

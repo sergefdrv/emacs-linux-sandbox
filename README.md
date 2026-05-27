@@ -8,7 +8,7 @@ The profile follows the same bubblewrap pattern as typical CLI sandboxes (tmpfs 
 
 ## What the sandbox enforces
 
-- **Filesystem isolation** -- `$HOME` is a tmpfs by default; only explicitly bound paths are visible (workspace rw, `~/.emacs.d` rw, shell rc / git config / fonts / tool installs ro).
+- **Filesystem isolation** -- `$HOME` is a tmpfs by default; only explicitly bound paths are visible (workspace rw, `~/.emacs.d` rw, shell rc / git config / fonts / tool installs ro). `~/.config`, `~/.cache`, and `~/.local` are sandbox-private overlays backed by `~/.local/share/emacs-sandbox/`, so subprocess XDG writes persist on disk without touching the host's real ones.
 - **User namespace** -- no SUID binary involved, no root inside the sandbox, `NoNewPrivileges` set.
 - **All Linux capabilities dropped.**
 - **Seccomp filter** -- generated at setup time from [`emacs.seccomp.deny.list`](emacs.seccomp.deny.list); blocks ~40 syscalls historically tied to kernel exploits (io_uring, bpf, userfaultfd, kexec, ptrace, mount, etc.).
@@ -109,6 +109,10 @@ Package-manager **caches** are carved out as **read-write** within those trees a
 Shell rc files are exposed read-only too: `~/.bashrc`, `~/.profile`, `~/.bash_profile`, `~/.zshrc`, `~/.zshenv`, `~/.inputrc`. Subshells spawned from `M-x shell`, `vterm`, `ansi-term` feel familiar.
 
 Fonts are bound read-only from `~/.local/share/fonts` and `~/.config/fontconfig` (if they exist), so user-installed fonts and any fontconfig overrides apply inside the sandbox.
+
+### XDG state: `~/.config`, `~/.cache`, `~/.local`
+
+Inside the sandbox, `~/.config`, `~/.cache`, and `~/.local` are bound from `~/.local/share/emacs-sandbox/{config,cache,local}` on the host -- the host's real XDG dirs are invisible. Subprocess writes (LSP state, language-tool caches, app data under `~/.local/share`, state under `~/.local/state`, dotfile-style configs) persist across sessions on disk but never reach the host's real ones. `rm -rf ~/.local/share/emacs-sandbox/{config,cache,local}` to reset. Specific host paths are re-exposed read-only on top of the overlay where Emacs needs them: `~/.config/fontconfig` (fonts), `~/.config/dconf` (GSettings / GTK theming), `~/.config/gtk-3.0`, `~/.config/gtk-4.0`, `~/.local/bin` (user CLI tools), `~/.local/share/pnpm` (toolchain). If a package needs more of the host's XDG tree visible inside, add it via the extension hooks below.
 
 ### Deliberate omissions: SSH, credentials, GPG
 
