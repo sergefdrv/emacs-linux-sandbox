@@ -147,6 +147,8 @@ If a package needs filesystem paths or sockets beyond the workspace + `~/.emacs.
 
 The file lives alongside the installed launcher (outside the sandbox's writable scope), so it can't be tampered with from inside Emacs.
 
+> **Footgun: `--setenv` is last-wins.** bwrap applies repeated `--setenv NAME …` left-to-right, with the last one overwriting earlier ones. Two hook blocks that each do `--setenv PATH "X:${PATH}"` and `--setenv PATH "Y:${PATH}"` won't compose -- only `Y` survives, and `X` (plus the script's own `INSTALL_DIR/bin:$HOME/.local/bin` prefix from its own `--setenv PATH`) is silently dropped. Same applies to any other env var. Recommended pattern: at most one `--setenv PATH` per file, with the full prefix chain spelled out, e.g. `"${HOME}/.foundry/bin:${HOME}/.local/opt/claude/bin:${INSTALL_DIR}/bin:${HOME}/.local/bin:${PATH}"`. For single-binary tools, prefer shadowing the binary at a path that's already in PATH (e.g. `--ro-bind /resolved/binary ${HOME}/.local/bin/<tool>`) instead of growing PATH.
+
 **Per-invocation: `$EMACS_SANDBOX_EXTRA_ARGS`** -- space-separated bwrap args for a single launch:
 
 ```bash
