@@ -19,10 +19,18 @@ kexec_load
 reboot
 
 # Privileged filesystem ops
-mount
+#
+# mount, umount2, and pivot_root are deliberately NOT denied: a nested
+# bubblewrap sandbox (e.g. one launched from a terminal inside Emacs) needs
+# them to build its mount namespace (bind mounts, then pivot_root onto the new
+# root and umount2(MNT_DETACH) of the old one). Denying them makes nested
+# sandboxing fail at "Failed to make / slave: Operation not permitted". This
+# widens kernel attack surface (the mount family has a CVE history) but does
+# NOT weaken the filesystem boundary: the outer sandbox's read-only binds are
+# created in a less-privileged user namespace, so their MS_RDONLY flags are
+# locked and a nested user namespace cannot clear them. Legacy umount (below)
+# stays denied -- bwrap uses umount2.
 umount
-umount2
-pivot_root
 swapon
 swapoff
 quotactl
@@ -60,9 +68,11 @@ mbind
 move_pages
 set_mempolicy
 
-# Namespaces (don't let code inside the sandbox build new namespaces).
-# Note: bwrap creates the sandbox by calling these BEFORE the filter is loaded,
-# so blocking them here only affects code running INSIDE the sandbox.
+# Namespaces: block joining EXISTING namespaces via setns. Creating NEW
+# namespaces (unshare / clone with CLONE_NEW*) is intentionally left allowed --
+# a nested sandbox needs it to build its own user, mount, net, and pid
+# namespaces. bwrap created THIS sandbox before the filter loaded, so setns
+# here only constrains code running inside it.
 setns
 
 # io_uring -- broad attack surface, has had multiple LPE CVEs
