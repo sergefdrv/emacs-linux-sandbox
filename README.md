@@ -11,7 +11,7 @@ The profile follows the same bubblewrap pattern as typical CLI sandboxes (tmpfs 
 - **Filesystem isolation** -- `$HOME` is a tmpfs by default; only explicitly bound paths are visible (workspace rw, `~/.emacs.d` rw, shell rc / git config / fonts / tool installs ro). `~/.config`, `~/.cache`, and `~/.local` are sandbox-private overlays backed by `~/.local/share/emacs-sandbox/`, so subprocess XDG writes persist on disk without touching the host's real ones.
 - **User namespace** -- no SUID binary involved, no root inside the sandbox, `NoNewPrivileges` set.
 - **All Linux capabilities dropped.**
-- **Seccomp filter** -- generated at setup time from [`emacs.seccomp.deny.list`](emacs.seccomp.deny.list); blocks ~40 syscalls historically tied to kernel exploits (io_uring, bpf, userfaultfd, kexec, ptrace, mount, etc.).
+- **Seccomp filter** -- generated at setup time from [`emacs.seccomp.deny.list`](emacs.seccomp.deny.list); blocks ~40 syscalls historically tied to kernel exploits (io_uring, bpf, userfaultfd, kexec, ptrace, etc.). The `mount` family is left allowed so a nested bubblewrap sandbox can run (see [Nested sandboxing](#nested-sandboxing)).
 - **PID, UTS, IPC, cgroup namespaces** unshared -- no view of host processes.
 - **Filtered session D-Bus** via `xdg-dbus-proxy` -- only `org.freedesktop.portal.Desktop`, `org.freedesktop.portal.OpenURI`, and `org.freedesktop.Notifications`.
 - **Wayland-only display** -- `GDK_BACKEND=wayland`, `DISPLAY` unset, only the `wayland-0` socket bound. No Xwayland fallback path is reachable.
@@ -154,6 +154,27 @@ The file lives alongside the installed launcher (outside the sandbox's writable 
 ```bash
 EMACS_SANDBOX_EXTRA_ARGS="--ro-bind /opt/something /opt/something" emacs
 ```
+
+## Nested sandboxing
+
+A bubblewrap sandbox launched from a terminal inside Emacs (for example a
+sandboxed CLI tool that confines its own subprocesses) needs to build its own
+mount namespace. This sandbox supports that: the inner bwrap needs `mount`,
+`umount2`, and `pivot_root`, which the seccomp filter leaves allowed (see
+[`emacs.seccomp.deny.list`](emacs.seccomp.deny.list)). User-namespace nesting
+works inside the sandbox already.
+
+**Trade-off.** Allowing the mount family widens kernel attack surface (it has a
+CVE history), which is why firejail-style filters block it. It does *not* weaken
+this sandbox's filesystem boundary: the outer read-only binds are created in a
+less-privileged user namespace, so their read-only flags are locked and the
+nested sandbox cannot clear them.
+
+**Opting out.** Nested support is on by default. To restore the hardened filter
+that blocks the mount family, run setup with `--no-nested-sandbox` (or
+`EMACS_SANDBOX_ALLOW_NESTED=0 ./emacs-sandbox-setup.sh`). The choice is recorded
+as `ALLOW_NESTED_SANDBOX` in the config (`~/.local/opt/emacs-sandbox/.emacs-sandbox.env`)
+and reused on subsequent re-runs; setup prompts for it on a fresh install.
 
 ## Customising the seccomp filter
 
