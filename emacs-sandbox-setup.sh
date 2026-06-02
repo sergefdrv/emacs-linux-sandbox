@@ -17,17 +17,27 @@ source "$SCRIPT_DIR/emacs-sandbox-common.sh"
 
 # ── Parse args ───────────────────────────────────────────────────────
 UNINSTALL=false
+# "" = unresolved (fall through to env/config/prompt); true/false = forced by flag.
+nested_flag=""
 for arg in "$@"; do
     case "$arg" in
-        --uninstall) UNINSTALL=true ;;
+        --uninstall)            UNINSTALL=true ;;
+        --no-nested-sandbox)    nested_flag=false ;;
+        --allow-nested-sandbox) nested_flag=true ;;
         --help|-h)
             cat <<EOF
-Usage: $0 [--uninstall]
+Usage: $0 [--uninstall] [--allow-nested-sandbox | --no-nested-sandbox]
 
   --uninstall   Remove the sandbox: \$INSTALL_DIR, the wrapper at
                 \$WRAPPER_PATH (only if it is ours), and the override
                 .desktop files under ~/.local/share/applications/ that
                 carry our marker. Preserves ~/.emacs.d and ~/.emacs.
+  --allow-nested-sandbox / --no-nested-sandbox
+                Whether the generated seccomp BPF leaves the mount family
+                (mount/umount2/pivot_root) unblocked so a nested bubblewrap
+                sandbox (one launched from a terminal inside Emacs) can run.
+                Default: allow. The choice persists in the config; re-runs
+                reuse it.
 
 Environment:
   WORKSPACE_DIR  Workspace directory bound rw inside the sandbox.
@@ -35,6 +45,8 @@ Environment:
   EMACS_BIN      Path to the real Emacs binary to invoke inside the
                  sandbox. Default: /usr/bin/emacs. Must be a PGTK build
                  ((featurep 'pgtk) returns t).
+  EMACS_SANDBOX_ALLOW_NESTED  1/true/yes or 0/false/no -- non-interactive
+                 equivalent of the --[no-]nested-sandbox flags.
 EOF
             exit 0
             ;;
@@ -204,6 +216,41 @@ fi
 mkdir -p "$WORKSPACE_DIR"
 WORKSPACE_DIR="$(readlink -f "$WORKSPACE_DIR")"
 
+# ── Nested-sandbox seccomp policy ────────────────────────────────────
+# The base deny-list leaves mount/umount2/pivot_root unblocked so a nested
+# bubblewrap sandbox (one launched from a terminal inside Emacs) can run.
+# Opt out to restore the hardened default that blocks them.
+# Resolution precedence:
+#   flag (--[no-]nested-sandbox) > env (EMACS_SANDBOX_ALLOW_NESTED)
+#     > existing config value (re-runs) > interactive prompt (default yes).
+NESTED_BLOCK_SYSCALLS="mount umount2 pivot_root"
+ALLOW_NESTED_SANDBOX="$nested_flag"
+if [[ -z "$ALLOW_NESTED_SANDBOX" && -n "${EMACS_SANDBOX_ALLOW_NESTED:-}" ]]; then
+    case "$EMACS_SANDBOX_ALLOW_NESTED" in
+        1|true|yes|TRUE|YES)  ALLOW_NESTED_SANDBOX=true ;;
+        0|false|no|FALSE|NO)  ALLOW_NESTED_SANDBOX=false ;;
+        *) echo "Warning: ignoring unrecognised EMACS_SANDBOX_ALLOW_NESTED='$EMACS_SANDBOX_ALLOW_NESTED'." >&2 ;;
+    esac
+fi
+if [[ -z "$ALLOW_NESTED_SANDBOX" && -f "$CONFIG_FILE" ]]; then
+    # Reuse the prior choice silently on re-run.
+    ALLOW_NESTED_SANDBOX="$(source "$CONFIG_FILE" 2>/dev/null && printf '%s' "${ALLOW_NESTED_SANDBOX:-}")"
+fi
+if [[ -z "$ALLOW_NESTED_SANDBOX" ]]; then
+    echo "A nested bubblewrap sandbox (one launched from a terminal inside"
+    echo "Emacs) can only run if the mount/umount2/pivot_root syscalls are left"
+    echo "unblocked in the seccomp filter. This widens kernel attack surface but"
+    echo "does not weaken this sandbox's filesystem boundary (see the README's"
+    echo "'Nested sandboxing' section)."
+    read -rp "Support nested sandboxing? [Y/n] " _ans
+    if [[ -n "$_ans" && ! "$_ans" =~ ^[Yy] ]]; then
+        ALLOW_NESTED_SANDBOX=false
+    else
+        ALLOW_NESTED_SANDBOX=true
+    fi
+    echo ""
+fi
+
 # ── Required directories ─────────────────────────────────────────────
 mkdir -p "$INSTALL_DIR" \
          "$INSTALL_DIR/bin" \
@@ -240,9 +287,19 @@ fi
 
 # ── Generate seccomp BPF ─────────────────────────────────────────────
 echo "Generating seccomp BPF..."
-python3 "$INSTALL_DIR/gen-seccomp-bpf.py" \
-    "$INSTALL_DIR/emacs.seccomp.deny.list" \
-    "$SECCOMP_BPF"
+deny_list="$INSTALL_DIR/emacs.seccomp.deny.list"
+if [[ "$ALLOW_NESTED_SANDBOX" != "true" ]]; then
+    # Hardened: append the mount family so nested bwrap is blocked too.
+    echo "  Nested sandboxing disabled -- also blocking: $NESTED_BLOCK_SYSCALLS"
+    deny_list="$INSTALL_DIR/emacs.seccomp.deny.effective.list"
+    {
+        cat "$INSTALL_DIR/emacs.seccomp.deny.list"
+        echo ""
+        echo "# --- appended by setup: nested sandboxing opted out ---"
+        printf '%s\n' $NESTED_BLOCK_SYSCALLS
+    } > "$deny_list"
+fi
+python3 "$INSTALL_DIR/gen-seccomp-bpf.py" "$deny_list" "$SECCOMP_BPF"
 echo ""
 
 # ── xdg-open shim (portal OpenURI for in-Emacs link clicks) ──────────
@@ -375,6 +432,11 @@ echo "Setup complete."
 echo "  Workspace:    $WORKSPACE_DIR"
 echo "  Emacs binary: $EMACS_BIN"
 echo "  Seccomp BPF:  $SECCOMP_BPF ($(stat -c%s "$SECCOMP_BPF") bytes)"
+if [[ "$ALLOW_NESTED_SANDBOX" == "true" ]]; then
+    echo "  Nesting:      supported (mount family allowed)"
+else
+    echo "  Nesting:      disabled (mount family blocked)"
+fi
 echo "  Wrapper:      $WRAPPER_PATH"
 echo "  Config:       $CONFIG_FILE"
 if (( ${#installed_desktops[@]} > 0 )); then

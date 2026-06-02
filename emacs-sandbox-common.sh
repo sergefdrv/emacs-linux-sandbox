@@ -51,6 +51,10 @@ write_emacs_sandbox_config() {
         printf 'WORKSPACE_DIR=%q\n' "$WORKSPACE_DIR"
         printf 'SECCOMP_BPF=%q\n'   "$SECCOMP_BPF"
         printf 'EMACS_BIN=%q\n'     "$EMACS_BIN"
+        # Whether the generated BPF leaves the mount family unblocked so a
+        # nested bubblewrap sandbox can run. Baked into the BPF at setup time;
+        # edit this and re-run setup (or pass --no-nested-sandbox) to change it.
+        printf 'ALLOW_NESTED_SANDBOX=%q\n' "${ALLOW_NESTED_SANDBOX:-true}"
     } > "$CONFIG_FILE"
 }
 
